@@ -6,8 +6,6 @@
 #include "Data/TwitchEnums.h"
 #include "Data/TwitchStructs.h"
 
-class UTwitchSubsystem;
-
 /**
  * Twitch messages receiver runnable
  */
@@ -70,7 +68,7 @@ public:
 	FTwitchMessageReceiver();
 	virtual ~FTwitchMessageReceiver() override;
 
-	void StartConnection(const FString& auth, const FString& username, const FString& channel, const float timeBetweenMessages);
+	void StartConnection(const FString& oAuth, const FString& username, const FString& channel, const float timeBetweenMessages);
 
 	// FRunnable interface.
 	virtual uint32 Run() override;

@@ -18,7 +18,7 @@ struct FTwitchConnection
 	{
 	}
 
-	FTwitchConnection(ETwitchConnectionMessageType Type,FString Message)
+	FTwitchConnection(const ETwitchConnectionMessageType Type,FString Message)
 	{
 		this->Type = Type;
 		this->Message = Message;
