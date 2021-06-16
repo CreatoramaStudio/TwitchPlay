@@ -11,9 +11,8 @@
 * Declaration of delegate type for messages received from chat.
 * Delegate signature should receive two parameters:
 * _message (const FString&) - Message received.
-* _username (const FString&) - Username of who sent the message.
 */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FTwitchMessageReceived, const FString&, Username, const FString&, Message);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FTwitchMessageReceived, const FTwitchChatMessage&, Message);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FTwitchConnectionMessage, const ETwitchConnectionMessageType, Type, const FString&, Message);
 
 
@@ -201,12 +200,11 @@ protected:
 	* Should call the parsing method to search for commands/options and fire the corresponding event.
 	*
 	* @param Message - The message that was received.
-	* @param Username - Username of who sent the chat message
 	*
 	* NOTE: Method must be marked as UFUNCTION in order to bind a dynamic delegate to it!
 	*/
 	UFUNCTION()
-	void MessageReceivedHandler(const FString& Message, const FString& Username);
+	void MessageReceivedHandler(const FTwitchChatMessage& Message);
 
 	static FString GetDelimitedString(const FString & InString, const FString & Delimiter);
 

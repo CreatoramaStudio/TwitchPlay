@@ -9,3 +9,4 @@ void FTwitchPlayModule::ShutdownModule()
 {}
 
 IMPLEMENT_MODULE(FTwitchPlayModule, TwitchPlay)
+

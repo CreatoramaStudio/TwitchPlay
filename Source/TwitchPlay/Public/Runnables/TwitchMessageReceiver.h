@@ -13,7 +13,7 @@ class FTwitchMessageReceiver : public FRunnable
 {
 public:	
 
-	TFunction<void(const FTwitchReceiveMessages& Messages)> ReceiveMessages;
+	TFunction<void(const FTwitchChatMessage& Messages)> ReceiveMessages;
 	TFunction<void(const FTwitchConnection& Connections)> ReceiveConnections;
 
 	using FTwitchReceiveMessagesQueue = TQueue<FTwitchReceiveMessages, EQueueMode::Spsc>;
@@ -105,12 +105,9 @@ private:
 	* Parses the message received from Twitch IRC chat in order to only get the content of the message.
 	* Since a single "message" could actually include multiple lines an array of strings is returned.
 	*
-	* @param message - Message to parse
-	* @param OutSenderUsername - The username(s) of the message sender(s). In sync with the return array.
-	* @param OutMessages - Parsed messages.
-	*
+	* @param Message - Message to parse
 	*/
-	void ParseMessage(const FString& message, TArray<FString>& OutSenderUsername, TArray<FString>& OutMessages) const;
+	void ParseMessage(const FString& Message) const;
 
 	/**
 	* Send a message on the connected socket

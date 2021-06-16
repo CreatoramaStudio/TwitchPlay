@@ -39,12 +39,9 @@ void UTwitchSubsystem::Connect(const FString& OAuth, const FString& Username, co
 	TwitchMessageReceiver->StartConnection(OAuth, Username, Channel, TimeBetweenChatMessages);
 
 	
-	TwitchMessageReceiver->ReceiveMessages = [&](const FTwitchReceiveMessages& Messages)
+	TwitchMessageReceiver->ReceiveMessages = [&](const FTwitchChatMessage& Messages)
 	{
-		for (int i = 0; i < Messages.Usernames.Num(); ++i)
-		{
-			OnMessageReceived.Broadcast(Messages.Usernames[i],Messages.Messages[i]);
-		}
+		OnMessageReceived.Broadcast(Messages);
 	};
 
 	TwitchMessageReceiver->ReceiveConnections = [&](const FTwitchConnection& Connection)
@@ -173,9 +170,9 @@ bool UTwitchSubsystem::UnregisterCommand(const FString& CommandName, FString& Ou
 	return true;
 }
 
-void UTwitchSubsystem::MessageReceivedHandler(const FString& Message, const FString& Username)
+void UTwitchSubsystem::MessageReceivedHandler(const FTwitchChatMessage& Message)
 {
-	const FString Command = GetCommandString(Message);
+	const FString Command = GetCommandString(Message.Message);
 
 	// No reason to search for the command in the event map, there isn't any
 	if (Command.IsEmpty())
@@ -190,8 +187,8 @@ void UTwitchSubsystem::MessageReceivedHandler(const FString& Message, const FStr
 	if (RegisteredCommand != nullptr)
 	{
 		TArray<FString> CommandOptions;
-		GetCommandOptionsStrings(Message, CommandOptions);
-		RegisteredCommand->ExecuteIfBound(Command, CommandOptions, Username);
+		GetCommandOptionsStrings(Message.Message, CommandOptions);
+		RegisteredCommand->ExecuteIfBound(Command, CommandOptions, Message.Username);
 	}
 }
 

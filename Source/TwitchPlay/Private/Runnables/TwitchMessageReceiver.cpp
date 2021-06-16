@@ -4,6 +4,7 @@
 #include "Runnables/TwitchMessageReceiver.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
+#include "Data/TwitchLog.h"
 
 inline FString ANSIBytesToString(const uint8* In, int32 Count)
 {
@@ -67,12 +68,9 @@ uint32 FTwitchMessageReceiver::Run()
 	{
 		// Create the server connection
 		ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
-		TSharedRef<FInternetAddr> connectionAddr = SocketSubsystem->CreateInternetAddr();
+		TSharedRef<FInternetAddr> ConnectionAddr = SocketSubsystem->CreateInternetAddr();
 
-		FAddressInfoResult GAIResult = SocketSubsystem->GetAddressInfo(TEXT("irc.twitch.tv"),
-											     nullptr,
-											     EAddressInfoFlags::Default,
-											     NAME_None);
+		FAddressInfoResult GAIResult = SocketSubsystem->GetAddressInfo(TEXT("irc.chat.twitch.tv"),nullptr,EAddressInfoFlags::Default,NAME_None);
 		if (GAIResult.Results.Num() == 0)
 		{
 			const FTwitchConnection Connection(ETwitchConnectionMessageType::FAILED_TO_CONNECT, TEXT("Could not resolve hostname!"));
@@ -81,13 +79,13 @@ uint32 FTwitchMessageReceiver::Run()
 			return 1; // if the host could not be resolved return false
 		}
 
-		connectionAddr->SetRawIp(GAIResult.Results[0].Address->GetRawIp());
+		ConnectionAddr->SetRawIp(GAIResult.Results[0].Address->GetRawIp());
 
 		// Set connection port
 		// HTTPS 6697
 		// HTTP 6667
-		const int32 port = 6697;
-		connectionAddr->SetPort(port);
+		const int32 Port = 6667;
+		ConnectionAddr->SetPort(Port);
 
 		FSocket* retSocket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("TwitchPlay Socket"), false);
 
@@ -101,12 +99,12 @@ uint32 FTwitchMessageReceiver::Run()
 		}
 
 		// Setting underlying connection parameters
-		int32 sizeOut;
-		retSocket->SetReceiveBufferSize(2 * 1024 * 1024, sizeOut);
+		int32 SizeOut;
+		retSocket->SetReceiveBufferSize(2 * 1024 * 1024, SizeOut);
 		retSocket->SetReuseAddr(true);
 
 		// Try connection
-		const bool bHasConnected = retSocket->Connect(*connectionAddr);
+		const bool bHasConnected = retSocket->Connect(*ConnectionAddr);
 
 		// If we cannot connect destroy the socket and return
 		if (!bHasConnected)
@@ -187,6 +185,9 @@ uint32 FTwitchMessageReceiver::Run()
 			// Request command capability (If the user has extended bot permissions this means something, else it is mostly ignored)
 			// This allows whispers to function, if the bot account has extended permissions.
 			SendIRCMessage(TEXT("CAP REQ :twitch.tv/commands"));
+
+			// Request tags capability (If the user has extended bot permissions this means something, else it is mostly ignored)
+			SendIRCMessage(TEXT("CAP REQ :twitch.tv/tags"));
 		}
 		else
 		{
@@ -212,13 +213,7 @@ uint32 FTwitchMessageReceiver::Run()
 			FString connectionMessage = ReceiveFromConnection();
 			if (!connectionMessage.IsEmpty())
 			{
-				FTwitchReceiveMessages newMessages;
-				ParseMessage(connectionMessage, newMessages.Usernames, newMessages.Messages);
-				if(newMessages.Messages.Num())
-				{
-					ReceivingQueue->Enqueue(newMessages);
-					ReceiveMessages(newMessages);
-				}
+				ParseMessage(connectionMessage);
 			}
 
 			if(NextSendMessageTime <= AccumulationTime)
@@ -404,93 +399,323 @@ FString FTwitchMessageReceiver::ReceiveFromConnection() const
 	return connectionMessage;
 }
 
-void FTwitchMessageReceiver::ParseMessage(const FString& message, TArray<FString>& OutSenderUsername, TArray<FString>& OutMessages) const
+void FTwitchMessageReceiver::ParseMessage(const FString& Message) const
 {
-	OutMessages.Reset();
+	FTwitchReceiveMessages TwitchMessages;
 	
-	TArray<FString> messageLines;
-	message.ParseIntoArrayLines(messageLines); // A single "message" from Twitch IRC could include multiple lines. Split them now
+	TArray<FString> MessageLines;
+	Message.ParseIntoArrayLines(MessageLines); // A single "message" from Twitch IRC could include multiple lines. Split them now
 
 	// Parse each line into its parts
 	// Each line from Twitch contains meta information and content
 	// Also need to check if the message is a PING sent from Twitch to check if the connection is alive
 	// This is in the form "PING :tmi.twitch.tv" to which we need to reply with "PONG :tmi.twitch.tv"
-	for (int32 cycleLine = 0; cycleLine < messageLines.Num(); cycleLine++)
+	for (int32 CycleLine = 0; CycleLine < MessageLines.Num(); CycleLine++)
 	{
 		// If we receive a PING immediately reply with a PONG and skip the line parsing
-		if (messageLines[cycleLine] == TEXT("PING :tmi.twitch.tv"))
+		if (MessageLines[CycleLine].Equals("PING :tmi.twitch.tv"))
 		{
-			SendIRCMessage(TEXT("PONG :tmi.twitch.tv"));
+			SendIRCMessage("PONG :tmi.twitch.tv");
 			continue; // Skip line parsing
 		}
 
+		if (!MessageLines[CycleLine].IsEmpty())
+		{
+			const FTwitchConnection Connection(ETwitchConnectionMessageType::MESSAGE, MessageLines[CycleLine]);
+			ConnectionQueue->Enqueue(Connection);
+			ReceiveConnections(Connection);
+		}
+
 		// Parsing line
-		// Basic message form is ":twitch_username!twitch_username@twitch_username.tmi.twitch.tv PRIVMSG #channel :message here"
-		// So we can split the message into two parts based off the ":" character: meta[0] and content[1..n]
-		// Also have to account for	possible ":" inside the content itself
-		TArray<FString> messageParts;
-		messageLines[cycleLine].ParseIntoArray(messageParts, TEXT(":"));
-		if(!messageParts.Num())
-		{
-			const FTwitchConnection Connection(ETwitchConnectionMessageType::MESSAGE, messageLines[cycleLine]);
-			ConnectionQueue->Enqueue(Connection);
-			ReceiveConnections(Connection);
-			continue;
-		}
+		// IRC tags docs: https://dev.twitch.tv/docs/irc/tags
+		// Message form with tag is:
 
-		// Meta parsing
-		// Meta info is split by whitespaces
-		TArray<FString> meta;
-		messageParts[0].ParseIntoArrayWS(meta);
-		if(meta.Num() < 2)
-		{
-			const FTwitchConnection Connection(ETwitchConnectionMessageType::MESSAGE, messageLines[cycleLine]);
-			ConnectionQueue->Enqueue(Connection);
-			ReceiveConnections(Connection);
-			continue;
-		}
+		// Example of a non-Bits message: The first Kappa (emote ID 25) is from character 0 (K) to character 4 (a), and the other Kappa is from 12 to 16.
+			// @badge-info=subscriber/11;badges=subscriber/6,premium/1,global_mod/1,turbo/1;color=#0D4200;display-name=ronni;emotes=25:0-4,12-16/1902:6-10;id=b34ccfc7-4977-403a-8a94-33c6bac34fb8;mod=0;room-id=1337;subscriber=0;tmi-sent-ts=1507246572675;turbo=1;user-id=1337;user-type=global_mod :ronni!ronni@ronni.tmi.twitch.tv PRIVMSG #ronni :Kappa Keepo Kappa
 
-		// Assume at this point the message is from a user, but just in case set it beforehand
-		// This is so that we can return an "empty" user if the message was of any other kind
-		// For example, messages from the server (like upon connection) don't have a username
-		FString senderUsername;
-		if (meta[1] == TEXT("PRIVMSG")) // Type of message should always be in position 1 (or at least I hope so)
-		{
-			// Username should be the first part before the first "!"
-			meta[0].Split(TEXT("!"), &senderUsername, nullptr);
-		}
+		// Example of a Bits message:
+			// @badge-info=subscriber/11;badges=subscriber/6,premium/1,staff/1,bits/1000;bits=100;color=#1E90FF;display-name=ronni;emotes=;id=b34ccfc7-4977-403a-8a94-33c6bac34fb8;mod=0;room-id=1337;subscriber=0;tmi-sent-ts=1507246572675;turbo=1;user-id=1337;user-type=staff :ronni!ronni@ronni.tmi.twitch.tv PRIVMSG #ronni :cheer100
 
-		if (senderUsername.IsEmpty())
+		if (MessageLines[CycleLine].StartsWith("@badge-info") && MessageLines[CycleLine].Contains("PRIVMSG"))
 		{
-			const FTwitchConnection Connection(ETwitchConnectionMessageType::MESSAGE, messageLines[cycleLine]);
-			ConnectionQueue->Enqueue(Connection);
-			ReceiveConnections(Connection);
-			continue; // Skip line
-		}
+			FTwitchChatMessage ChatMessage;
 
-		// Some messages correspond to events sent by the server (JOIN etc.)
-		// In that case the message part is only one
-		if (messageParts.Num() > 1)
-		{
-			// Content of the message is composed by all parts of the message from messageParts[1] on
-			FString messageContent = messageParts[1];
-			if (messageParts.Num() > 2)
+			TArray<FString> messageParts;
+			MessageLines[CycleLine].ParseIntoArray(messageParts, TEXT(" :"));
+
+			//Tags
+			TArray<FString> Tags;
+			messageParts[0].ParseIntoArray(Tags, TEXT(";"));
+			
+			for (auto Tag : Tags)
 			{
-				for (int32 cycleContent = 2; cycleContent < messageParts.Num(); cycleContent++)
+				if (Tag.StartsWith("@badge-info"))
 				{
-					// Add back the ":" that was used as the splitter
-					messageContent += TEXT(":") + messageParts[cycleContent];
+					FString Values;
+					Tag.Split("=", nullptr, &Values);
+					if (Values.IsEmpty())
+					{
+						continue;
+					}
+					TArray<FString> BadgesInfo;
+					Values.ParseIntoArray(BadgesInfo, TEXT(","));
+
+					for (auto BadgeInfo : BadgesInfo)
+					{
+						if (BadgeInfo.StartsWith("admin"))
+						{
+							
+							continue;
+						}
+
+						if (BadgeInfo.StartsWith("bits"))
+						{
+							
+							continue;
+						}
+
+						if (BadgeInfo.StartsWith("broadcaster"))
+						{
+							
+							continue;
+						}
+
+						if (BadgeInfo.StartsWith("global_mod"))
+						{
+							
+							continue;
+						}
+
+						if (BadgeInfo.StartsWith("moderator"))
+						{
+							
+							continue;
+						}
+
+						if (BadgeInfo.StartsWith("subscriber"))
+						{
+							FString Subscriber;
+							BadgeInfo.Split("/", nullptr, &Subscriber);
+							if (Subscriber.IsNumeric())
+							{
+								ChatMessage.bIsSubbed = FCString::Atof(*Subscriber) > 0;
+							}
+							continue;
+						}
+
+						if (BadgeInfo.StartsWith("premium"))
+						{
+							FString Premium;
+							BadgeInfo.Split("/", nullptr, &Premium);
+							if (Premium.IsNumeric())
+							{
+								ChatMessage.bIsSubbed = FCString::Atof(*Premium) > 0;
+							}
+							continue;
+						}
+
+						if (BadgeInfo.StartsWith("staff"))
+						{
+							
+							continue;
+						}
+
+						if (BadgeInfo.StartsWith("turbo"))
+						{
+							
+							continue;
+						}
+					}
+					continue;
+				}
+				
+				if (Tag.StartsWith("badges"))
+				{
+					FString Values;
+					Tag.Split("=", nullptr, &Values);
+					if (Values.IsEmpty())
+					{
+						continue;
+					}
+					TArray<FString> Badges;
+					Values.ParseIntoArray(Badges, TEXT(","));
+
+					for (auto Badge : Badges)
+					{
+						{
+							if (Badge.StartsWith("admin"))
+							{
+							
+								continue;
+							}
+
+							if (Badge.StartsWith("bits"))
+							{
+							
+								continue;
+							}
+
+							if (Badge.StartsWith("broadcaster"))
+							{
+							
+								continue;
+							}
+
+							if (Badge.StartsWith("global_mod"))
+							{
+							
+								continue;
+							}
+
+							if (Badge.StartsWith("moderator"))
+							{
+							
+								continue;
+							}
+
+							if (Badge.StartsWith("subscriber"))
+							{
+								FString Subscriber;
+								Badge.Split("/", nullptr, &Subscriber);
+								if (Subscriber.IsNumeric())
+								{
+									ChatMessage.bIsSubbed = FCString::Atof(*Subscriber) > 0;
+								}
+								continue;
+							}
+
+							if (Badge.StartsWith("premium"))
+							{
+								FString Premium;
+								Badge.Split("/", nullptr, &Premium);
+								if (Premium.IsNumeric())
+								{
+									ChatMessage.bIsSubbed = FCString::Atof(*Premium) > 0;
+								}
+								continue;
+							}
+
+							if (Badge.StartsWith("staff"))
+							{
+							
+								continue;
+							}
+
+							if (Badge.StartsWith("turbo"))
+							{
+							
+								continue;
+							}
+						}
+					}
+					continue;
+				}
+				
+				if (Tag.StartsWith("bits"))
+				{
+					FString Bits;
+					Tag.Split("=", nullptr, &Bits);
+					if (Bits.IsNumeric())
+					{
+						ChatMessage.bBits = true;
+						ChatMessage.Bits = FCString::Atof(*Bits);
+					}
+					continue;
+				}
+				
+				if (Tag.StartsWith("color"))
+				{
+					FString Color;
+					Tag.Split("=", nullptr, &Color);
+					if (!Color.IsEmpty())
+					{
+						ChatMessage.UserColor = FColor::FromHex(Color);
+					}
+					continue;
+				}
+				
+				if (Tag.StartsWith("display-name"))
+				{
+					FString DisplayName;
+					Tag.Split("=", nullptr, &DisplayName);
+					
+					if (!DisplayName.IsEmpty())
+					{
+						ChatMessage.Username = DisplayName;
+					}
+					continue;
+				}
+				
+				if (Tag.StartsWith("emotes"))
+				{
+
+					continue;
+				}
+				
+				if (Tag.StartsWith("flags"))
+				{
+
+					continue;
+				}
+				
+				if (Tag.StartsWith("id"))
+				{
+
+					continue;
+				}
+				
+				if (Tag.StartsWith("mod"))
+				{
+
+					continue;
+				}
+				
+				if (Tag.StartsWith("room-id"))
+				{
+
+					continue;
+				}
+				
+				if (Tag.StartsWith("tmi-sent-ts"))
+				{
+
+					continue;
+				}
+				
+				if (Tag.StartsWith("user-id"))
+				{
+
+					continue;
 				}
 			}
-			OutMessages.Add(messageContent);
-			OutSenderUsername.Add(senderUsername);
+			
+			
+			// Username
+			if (!ChatMessage.Username.IsEmpty() && messageParts.Num() >= 2)
+			{
+				FString SenderUsername;
+				messageParts[1].Split("!", &SenderUsername, nullptr);
+
+				ChatMessage.Username = SenderUsername;
+			}
+
+			//Message
+			if (!ChatMessage.Username.IsEmpty() && messageParts.Num() >= 3)
+			{
+				ChatMessage.Message = messageParts[2];
+			}
+			
+			TwitchMessages.Messages.Add(ChatMessage.Message);
+			TwitchMessages.Usernames.Add(ChatMessage.Username);
+
+			ReceiveMessages(ChatMessage);
 		}
-		else if(messageParts.Num())
-		{
-			const FTwitchConnection Connection(ETwitchConnectionMessageType::MESSAGE, messageParts[0]);
-			ConnectionQueue->Enqueue(Connection);
-			ReceiveConnections(Connection);
-		}
+		
+	}
+
+	if(TwitchMessages.Messages.Num())
+	{
+		ReceivingQueue->Enqueue(TwitchMessages);
 	}
 }
 
