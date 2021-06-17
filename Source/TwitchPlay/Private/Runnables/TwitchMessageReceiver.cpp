@@ -4,7 +4,6 @@
 #include "Runnables/TwitchMessageReceiver.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
-#include "Data/TwitchLog.h"
 
 inline FString ANSIBytesToString(const uint8* In, int32 Count)
 {
