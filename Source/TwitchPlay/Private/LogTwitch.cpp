@@ -1,18 +1,18 @@
-﻿#include "TwitchLog.h"
+﻿#include "LogTwitch.h"
 
 DEFINE_LOG_CATEGORY(LogTwitchPlay);
 
-void PrintInfoTwitchPlay(const FString& String)
+void FLogTwitchPlay::Info(const FString& String)
 {
 	UE_LOG(LogTwitchPlay, Display, TEXT("%s"), *String);
 }
 
-void PrintWarningTwitchPlay(const FString& String)
+void FLogTwitchPlay::Warning(const FString& String)
 {
 	UE_LOG(LogTwitchPlay, Warning, TEXT("%s"), *String);
 }
 
-void PrintErrorTwitchPlay(const FString& String)
+void FLogTwitchPlay::Error(const FString& String)
 {
 	UE_LOG(LogTwitchPlay, Error, TEXT("%s"), *String);
 }
