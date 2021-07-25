@@ -74,6 +74,7 @@ protected:
 	*
 	* TODO: Unbind all events on component destruction? I don't know if it would generate memory leaks if not done
 	*/
+	UPROPERTY()
 	TMap<FString, FOnCommandReceived> BoundEvents;
 
 	
