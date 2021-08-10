@@ -2,6 +2,8 @@
 
 
 #include "Subsystems/TwitchSubsystem.h"
+
+#include "LogTwitch.h"
 #include "Runnables/TwitchMessageReceiver.h"
 
 void UTwitchSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -26,11 +28,13 @@ void UTwitchSubsystem::Connect(const FString& OAuth, const FString& Username, co
 	if(TwitchMessageReceiver.IsValid())
 	{
 		OnConnectionMessage.Broadcast(ETwitchConnectionMessageType::ERROR, TEXT("Already connected / connecting / pending!"));
+		FLogTwitchPlay::Warning("UTwitchSubsystem::Connect  Already connected / connecting / pending!");
 		return;
 	}
 	if(OAuth.IsEmpty() || Username.IsEmpty())
 	{
 		OnConnectionMessage.Broadcast(ETwitchConnectionMessageType::ERROR, TEXT("Invalid connection parameters. Check your strings."));
+		FLogTwitchPlay::Error("UTwitchSubsystem::Connect  Invalid connection parameters. Check your strings.");
 		return;
 	}
 
@@ -120,12 +124,12 @@ void UTwitchSubsystem::SetupEncapsulationChars(const FString& CommandChar, const
 	OptionsEncapsulationChar = OptionsChar;
 }
 
-bool UTwitchSubsystem::RegisterCommand(const FString& CommandName, const FOnCommandReceived& Callback, FString& OutResult)
+bool UTwitchSubsystem::RegisterCommand(const FString& CommandName, const FOnCommandReceived& Callback)
 {
 	// No reason to register an empty command
 	if (CommandName.IsEmpty())
 	{
-		OutResult = TEXT("Command type string is invalid");
+		FLogTwitchPlay::Warning("UTwitchSubsystem::RegisterCommand  Command type string is invalid");
 		return false;
 	}
 
@@ -136,38 +140,52 @@ bool UTwitchSubsystem::RegisterCommand(const FString& CommandName, const FOnComm
 	// If the command we want to register is already in the event map 
 	// copy the new delegate object info into it   
 	// For optimization purposes don't delete the entry in order to create a new one.
-	if (RegisteredCommand != nullptr)
+	if (RegisteredCommand)
 	{
 		*RegisteredCommand = Callback;
-		OutResult = CommandName + TEXT(" command registered. It overwrote a previous registration of the same type");
+		FLogTwitchPlay::Info("UTwitchSubsystem::RegisterCommand  " + CommandName + " command registered. It overwrote a previous registration of the same type");
 	}
 	else
 	{
 		// If the command is not registered yet create a new entry for it
 		// and copy the incoming delegate object info to the new delegate object
 		BoundEvents.Add(CommandName, Callback);
-		OutResult = CommandName + TEXT(" command registered");
+		FLogTwitchPlay::Info("UTwitchSubsystem::RegisterCommand  " + CommandName + " command registered");
 	}
 	return true;
 }
 
-bool UTwitchSubsystem::UnregisterCommand(const FString& CommandName, FString& OutResult)
+bool UTwitchSubsystem::UnregisterCommand(const FString& CommandName)
 {
 	// No reason to unregister an empty command 
-	if (CommandName == "")
+	if (CommandName.IsEmpty())
 	{
-		OutResult = TEXT("Command type string is invalid");
+		FLogTwitchPlay::Warning("UTwitchSubsystem::UnregisterCommand  Command type string is invalid");
 		return false;
 	}
 
-	if (BoundEvents.Remove(CommandName) == 0)
+	if (!BoundEvents.Remove(CommandName))
 	{
-		OutResult = TEXT("No command of this type was registered");
+		FLogTwitchPlay::Warning("UTwitchSubsystem::UnregisterCommand  No command of this type was registered");
 		return false;
 	}
 	
-	OutResult = CommandName + TEXT(" unregistered");
 	return true;
+}
+
+void UTwitchSubsystem::UnregisterAllCommands()
+{
+	for(auto CommandName : GetAllCommandNames())
+	{
+		UnregisterCommand(CommandName);
+	}
+}
+
+TArray<FString> UTwitchSubsystem::GetAllCommandNames() const
+{
+	TArray<FString> Keys;
+	BoundEvents.GetKeys(Keys);
+	return Keys;
 }
 
 void UTwitchSubsystem::MessageReceivedHandler(const FTwitchChatMessage& Message)

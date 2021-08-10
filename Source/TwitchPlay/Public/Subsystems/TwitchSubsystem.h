@@ -54,14 +54,14 @@ public:
 /////////////////// Commands	
 	
 	// Character to use for command encapsulation. Commands will be read in the form CHAR_Command_CHAR (no spaces or underscores!)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Twitch|Commands Setup")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Twitch|Commands Setup")
 	FString CommandEncapsulationChar = "!";
 
 	/**
 	* Character to use for command options encapsulation. Commands will be read in the form CHAR_Option1[,Option2,..]_CHAR (no spaces or underscores!)
 	* Multiple options can be specified and will be split into an FString array upon parsing
 	*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Twitch|Commands Setup")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Twitch|Commands Setup")
 	FString OptionsEncapsulationChar = "#";
 
 protected:
@@ -163,7 +163,7 @@ public:
 	* @param CommandChar - Character(s) to use to encapsulate commands.
 	* @param OptionsChar - Character(s) to use to encapsulate command options.
 	*/
-	UFUNCTION(BlueprintCallable, Category = "Twitch|Commands Setup")
+	UFUNCTION(BlueprintCallable, Category = "Twitch|Commands")
 	void SetupEncapsulationChars(const FString& CommandChar, const FString& OptionsChar);
 
 	/**
@@ -175,24 +175,28 @@ public:
 	*
 	* @param CommandName - The command to register (CASE SENSITIVE).
 	* @param Callback - The function to fire when the event rises.
-	* @param OutResult - Result of the operation.
 	*
 	* @return Whether the registration was successfully completed.
 	*/
-	UFUNCTION(BlueprintCallable, Category = "Twitch|Commands Setup")
-	bool RegisterCommand(const FString& CommandName, const FOnCommandReceived& Callback, FString& OutResult);
+	UFUNCTION(BlueprintCallable, Category = "Twitch|Commands")
+	bool RegisterCommand(const FString& CommandName, const FOnCommandReceived& Callback);
 
 	/**
 	* Unregisters a command to stop receiving events whenever that command is called via chat.
 	* Keep in mind that since each command can only be bound to a single function (and single object) unregistering that command will remove any function from any object.
 	*
 	* @param CommandName - The command to unregister (CASE SENSITIVE).
-	* @param OutResult - Result of the operation.
 	*
 	* @return Whether the unregistration was successfully completed.
 	*/
-	UFUNCTION(BlueprintCallable, Category = "Twitch|Commands Setup")
-	bool UnregisterCommand(const FString& CommandName, FString& OutResult);
+	UFUNCTION(BlueprintCallable, Category = "Twitch|Commands")
+	bool UnregisterCommand(const FString& CommandName);
+
+	UFUNCTION(BlueprintCallable, Category = "Twitch|Commands")
+	void UnregisterAllCommands();
+
+	UFUNCTION(BlueprintPure, Category = "Twitch|Commands")
+	TArray<FString> GetAllCommandNames() const;
 
 protected:
 
